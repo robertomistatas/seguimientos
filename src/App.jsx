@@ -1,38 +1,65 @@
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
-import { 
-    getAuth, 
-    onAuthStateChanged, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword, 
+import { getAnalytics } from 'firebase/analytics';
+import {
+    getAuth,
+    onAuthStateChanged,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
     signOut,
     signInAnonymously,
     signInWithCustomToken
 } from 'firebase/auth';
-import { 
-    getFirestore, 
-    collection, 
-    doc, 
-    setDoc, 
-    getDoc, 
-    addDoc, 
-    query, 
-    where, 
+import {
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    getDoc,
+    addDoc,
+    query,
+    where,
     getDocs,
     onSnapshot
 } from 'firebase/firestore';
+import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
+} from 'recharts';
+import {
+    CheckCircle, AlertTriangle, XCircle, Clock, Phone, Users, BarChart2, Upload, History, LogOut,
+    ChevronDown, ChevronUp
+} from 'lucide-react';
 
 // --- CONTEXTO DE AUTENTICACIÓN ---
 const AuthContext = createContext(null);
 
 // --- CONFIGURACIÓN DE FIREBASE ---
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-const firebaseConfig = JSON.parse(firebaseConfigString);
+const firebaseConfig = {
+  apiKey: "AIzaSyASPhkFj4RwmmloxSgJzK3JhXD7-qz2yxk",
+  authDomain: "teleasistencia-6c0fd.firebaseapp.com",
+  projectId: "teleasistencia-6c0fd",
+  storageBucket: "teleasistencia-6c0fd.firebasestorage.app",
+  messagingSenderId: "551971576400",
+  appId: "1:551971576400:web:952333e1409c2ecdaf8f55",
+  measurementId: "G-4Z9KWG6JJS"
+};
 
 // --- INICIALIZACIÓN DE FIREBASE ---
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
+// NOTA: Asegúrate de que tus reglas de seguridad de Firestore permitan escrituras
+// en la colección 'users' para los usuarios autenticados. Ejemplo:
+// rules_version = '2';
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+//     match /users/{userId} {
+//       allow read, write: if request.auth != null && request.auth.uid == userId;
+//     }
+//     // Reglas para otras colecciones
+//   }
+// }
 
 // --- COMPONENTES DE LA UI (Iconos, etc.) ---
 
@@ -49,8 +76,6 @@ const StatCard = ({ title, value, icon, color }) => (
 );
 
 const BeneficiaryCard = ({ beneficiary, status }) => {
-    const { CheckCircle, AlertTriangle, XCircle } = window.lucide;
-
     const statusConfig = {
         'Al día': { color: 'border-green-500 bg-green-50 dark:bg-green-900/20 dark:border-green-700', icon: <CheckCircle className="text-green-500" /> },
         'Pendiente': { color: 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-600', icon: <AlertTriangle className="text-yellow-500" /> },
@@ -77,10 +102,6 @@ const BeneficiaryCard = ({ beneficiary, status }) => {
 
 // --- MÓDULO: DASHBOARD ---
 const Dashboard = () => {
-    const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } = window.Recharts;
-    const { CheckCircle, Clock, Phone, Users } = window.lucide;
-
-    // Datos de ejemplo para las gráficas. Deberían venir de Firestore.
     const callsByOperator = [
         { name: 'Ana', llamadas: 120, tiempo: 480 },
         { name: 'Juan', llamadas: 98, tiempo: 350 },
@@ -110,7 +131,7 @@ const Dashboard = () => {
             {/* Métricas Clave */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard title="Llamados Exitosos" value="462" icon={<CheckCircle size={24} className="text-white" />} color="bg-gradient-to-br from-green-400 to-green-600" />
-                <StatCard title="Tiempo Total (min)" value="1,800" icon={<Clock size={24} className="text-white" />} color="bg-gradient-to-br from-blue-400 to-blue-600" />
+                <StatCard title="Tiempo Total (min)" value="1,800" icon={<Clock size={24} className="text-white" />} color="bg-gradient-to-br from-blue-400 to blue-600" />
                 <StatCard title="Promedio Llamada (min)" value="3.9" icon={<Phone size={24} className="text-white" />} color="bg-gradient-to-br from-purple-400 to-purple-600" />
                 <StatCard title="Beneficiarios Activos" value="125" icon={<Users size={24} className="text-white" />} color="bg-gradient-to-br from-yellow-400 to-yellow-600" />
             </div>
@@ -175,10 +196,29 @@ const Dashboard = () => {
 // --- MÓDULO: REGISTRO DE LLAMADAS ---
 const RegistroLlamadas = () => {
     const [file, setFile] = useState(null);
-    const [data, setData] = useState([]);
+    const [data, setData] = useState(() => {
+        const savedData = localStorage.getItem('llamadasData');
+        return savedData ? JSON.parse(savedData) : [];
+    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [analysis, setAnalysis] = useState(null);
+    const [analysis, setAnalysis] = useState(() => {
+        const savedAnalysis = localStorage.getItem('llamadasAnalysis');
+        return savedAnalysis ? JSON.parse(savedAnalysis) : null;
+    });
+
+    // Guardar datos en localStorage cuando cambien
+    useEffect(() => {
+        if (data.length > 0) {
+            localStorage.setItem('llamadasData', JSON.stringify(data));
+        }
+    }, [data]);
+
+    useEffect(() => {
+        if (analysis) {
+            localStorage.setItem('llamadasAnalysis', JSON.stringify(analysis));
+        }
+    }, [analysis]);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
@@ -188,6 +228,14 @@ const RegistroLlamadas = () => {
         }
     };
 
+    const handleClearData = () => {
+        setData([]);
+        setAnalysis(null);
+        setFile(null);
+        localStorage.removeItem('llamadasData');
+        localStorage.removeItem('llamadasAnalysis');
+    };
+
     const processFile = async () => {
         if (!file) {
             setError('Por favor, selecciona un archivo Excel.');
@@ -195,7 +243,11 @@ const RegistroLlamadas = () => {
         }
         setLoading(true);
         setError('');
+        // Limpiar datos anteriores antes de procesar el nuevo archivo
+        setData([]);
         setAnalysis(null);
+        localStorage.removeItem('llamadasData');
+        localStorage.removeItem('llamadasAnalysis');
 
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -250,19 +302,31 @@ const RegistroLlamadas = () => {
 
         const avgDurationMinutes = successful > 0 ? (totalDurationSeconds / successful / 60).toFixed(2) : 0;
         
-        setAnalysis({
+        const newAnalysis = {
             totalCalls,
             incoming,
             outgoing,
             successful,
             unidentified,
             avgDurationMinutes
-        });
+        };
+        
+        setAnalysis(newAnalysis);
     }
 
     return (
         <div className="p-4 sm:p-8 space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Registro de Llamadas</h1>
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Registro de Llamadas</h1>
+                {(data.length > 0 || analysis) && (
+                    <button
+                        onClick={handleClearData}
+                        className="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition-colors"
+                    >
+                        Eliminar Datos
+                    </button>
+                )}
+            </div>
             <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
                 <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Subir Archivo de Llamadas</h2>
                 <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -290,7 +354,7 @@ const RegistroLlamadas = () => {
                             <p className="text-sm text-gray-500 dark:text-gray-400">Total Llamadas</p>
                             <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">{analysis.totalCalls}</p>
                         </div>
-                         <div className="p-4 bg-green-50 dark:bg-green-900/50 rounded-lg">
+                        <div className="p-4 bg-green-50 dark:bg-green-900/50 rounded-lg">
                             <p className="text-sm text-green-600 dark:text-green-300">Exitosas</p>
                             <p className="text-2xl font-bold text-green-800 dark:text-green-200">{analysis.successful}</p>
                         </div>
@@ -298,18 +362,48 @@ const RegistroLlamadas = () => {
                             <p className="text-sm text-blue-600 dark:text-blue-300">Duración Prom. (min)</p>
                             <p className="text-2xl font-bold text-blue-800 dark:text-blue-200">{analysis.avgDurationMinutes}</p>
                         </div>
-                         <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                             <p className="text-sm text-gray-500 dark:text-gray-400">Entrantes</p>
                             <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">{analysis.incoming}</p>
                         </div>
-                         <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                             <p className="text-sm text-gray-500 dark:text-gray-400">Salientes</p>
                             <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">{analysis.outgoing}</p>
                         </div>
-                         <div className="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg">
+                        <div className="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg">
                             <p className="text-sm text-yellow-600 dark:text-yellow-300">No Identificados</p>
                             <p className="text-2xl font-bold text-yellow-800 dark:text-yellow-200">{analysis.unidentified}</p>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {data.length > 0 && (
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg overflow-auto">
+                    <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Detalle de Llamadas</h2>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    {Object.keys(data[0]).map((header, index) => (
+                                        <th key={index} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                            {header}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                {data.map((row, rowIndex) => (
+                                    <tr key={rowIndex}>
+                                        {Object.values(row).map((cell, cellIndex) => (
+                                            <td key={cellIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                {cell}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
@@ -319,18 +413,368 @@ const RegistroLlamadas = () => {
 
 // --- MÓDULO: ASIGNACIONES ---
 const Asignaciones = () => {
-    // Lógica para cargar, mostrar y editar asignaciones desde Firestore
+    const [showNewOperatorForm, setShowNewOperatorForm] = useState(false);
+    const [operators, setOperators] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [selectedOperator, setSelectedOperator] = useState(null);
+    const [file, setFile] = useState(null);
+    const [fileLoading, setFileLoading] = useState(false);
+    const [fileError, setFileError] = useState('');
+    // Nuevo estado para manejar qué operadores tienen su lista expandida
+    const [expandedOperators, setExpandedOperators] = useState({});
+
+    // Toggle para expandir/colapsar la lista de beneficiarios
+    const toggleOperatorExpansion = (operatorId) => {
+        setExpandedOperators(prev => ({
+            ...prev,
+            [operatorId]: !prev[operatorId]
+        }));
+    };
+
+    // Formulario para nuevo operador
+    const [newOperator, setNewOperator] = useState({
+        nombre: '',
+        email: '',
+        telefono: ''
+    });
+
+    // Cargar teleoperadores al montar el componente
+    useEffect(() => {
+        const loadOperators = async () => {
+            try {
+                const operatorsRef = collection(db, 'operators');
+                const snapshot = await getDocs(operatorsRef);
+                const operatorsList = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setOperators(operatorsList);
+            } catch (err) {
+                console.error('Error al cargar teleoperadores:', err);
+                setError('Error al cargar la lista de teleoperadores');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadOperators();
+    }, []);
+
+    // Crear nuevo operador
+    const handleCreateOperator = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+            const operatorsRef = collection(db, 'operators');
+            const docRef = await addDoc(operatorsRef, {
+                ...newOperator,
+                createdAt: new Date().toISOString(),
+                beneficiarios: []
+            });
+
+            setOperators([...operators, { id: docRef.id, ...newOperator }]);
+            setShowNewOperatorForm(false);
+            setNewOperator({ nombre: '', email: '', telefono: '' });
+        } catch (err) {
+            console.error('Error al crear teleoperador:', err);
+            setError('Error al crear el teleoperador');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Procesar archivo Excel
+    const processFile = async () => {
+        if (!file || !selectedOperator) {
+            setFileError('Por favor, selecciona un archivo Excel y un teleoperador');
+            return;
+        }
+
+        setFileLoading(true);
+        setFileError('');
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const workbook = window.XLSX.read(e.target.result, { type: 'binary' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                // Cambiamos la forma en que obtenemos los datos del Excel
+                const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { 
+                    header: ["Nombre", "Teléfono", "Comuna"],
+                    range: 1  // Empezar desde la segunda fila (ignorar headers)
+                });
+
+                // Validar y procesar datos
+                const processedData = jsonData
+                    .filter(row => row.Nombre && row.Teléfono && row.Comuna) // Asegurarnos que tengan los campos requeridos
+                    .map(row => {
+                        // Convertir el teléfono a string si es número
+                        const telefonoStr = String(row.Teléfono);
+                        // Separar los teléfonos usando varios separadores posibles
+                        const telefonos = telefonoStr
+                            .split(/[\s|-|,|;|\|]/)
+                            .map(tel => tel.trim().replace(/\D/g, '')) // Eliminar caracteres no numéricos
+                            .filter(tel => tel.length === 9); // Mantener solo números de 9 dígitos
+
+                        return {
+                            nombre: row.Nombre.trim(),
+                            telefonos,
+                            comuna: row.Comuna.trim()
+                        };
+                    })
+                    .filter(b => b.nombre && b.telefonos.length > 0 && b.comuna);
+
+                if (processedData.length === 0) {
+                    throw new Error('No se encontraron datos válidos en el archivo Excel. Verifica que el formato sea correcto.');
+                }
+
+                // Actualizar en Firestore
+                const operatorRef = doc(db, 'operators', selectedOperator.id);
+                await setDoc(operatorRef, {
+                    ...selectedOperator,
+                    beneficiarios: processedData,
+                    lastUpdate: new Date().toISOString()
+                }, { merge: true });
+
+                // Actualizar estado local
+                setOperators(operators.map(op => 
+                    op.id === selectedOperator.id 
+                        ? { ...op, beneficiarios: processedData }
+                        : op
+                ));
+
+                setFile(null);
+                setSelectedOperator(null);
+                setFileError(''); // Limpiar cualquier error previo
+
+            } catch (err) {
+                console.error('Error al procesar el archivo:', err);
+                setFileError(err.message || 'Error al procesar el archivo. Verifica que el formato sea correcto y que contenga las columnas: Nombre, Teléfono y Comuna.');
+            } finally {
+                setFileLoading(false);
+            }
+        };
+
+        reader.readAsBinaryString(file);
+    };
+
+    // Eliminar asignaciones de un operador
+    const handleClearAssignments = async (operatorId) => {
+        try {
+            const operatorRef = doc(db, 'operators', operatorId);
+            await setDoc(operatorRef, {
+                beneficiarios: []
+            }, { merge: true });
+
+            setOperators(operators.map(op => 
+                op.id === operatorId 
+                    ? { ...op, beneficiarios: [] }
+                    : op
+            ));
+        } catch (err) {
+            console.error('Error al eliminar asignaciones:', err);
+            setError('Error al eliminar las asignaciones');
+        }
+    };
+
     return (
-        <div className="p-4 sm:p-8">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-6">Asignaciones de Beneficiarios</h1>
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
-                <p className="text-gray-600 dark:text-gray-300">Módulo en construcción. Aquí se podrán cargar y gestionar las listas de beneficiarios asignados a cada teleoperadora.</p>
-                {/* Ejemplo de UI */}
-                <div className="mt-4">
-                    <button className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700">
-                        Cargar Asignaciones (CSV/Excel)
-                    </button>
+        <div className="p-4 sm:p-8 space-y-6">
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Asignaciones de Beneficiarios</h1>
+                <button
+                    onClick={() => setShowNewOperatorForm(true)}
+                    className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+                >
+                    Nuevo Teleoperador
+                </button>
+            </div>
+
+            {error && (
+                <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
+                    <p>{error}</p>
                 </div>
+            )}
+
+            {/* Formulario para nuevo operador */}
+            {showNewOperatorForm && (
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+                    <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Crear Nuevo Teleoperador</h2>
+                    <form onSubmit={handleCreateOperator} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Nombre</label>
+                            <input
+                                type="text"
+                                value={newOperator.nombre}
+                                onChange={(e) => setNewOperator({...newOperator, nombre: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
+                            <input
+                                type="email"
+                                value={newOperator.email}
+                                onChange={(e) => setNewOperator({...newOperator, email: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Teléfono</label>
+                            <input
+                                type="tel"
+                                value={newOperator.telefono}
+                                onChange={(e) => setNewOperator({...newOperator, telefono: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                required
+                            />
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowNewOperatorForm(false)}
+                                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400"
+                            >
+                                {loading ? 'Guardando...' : 'Guardar'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {/* Sección de carga de Excel */}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Asignar Beneficiarios</h2>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Seleccionar Teleoperador
+                        </label>
+                        <select
+                            value={selectedOperator?.id || ''}
+                            onChange={(e) => setSelectedOperator(operators.find(op => op.id === e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        >
+                            <option value="">Seleccione un teleoperador</option>
+                            {operators.map(op => (
+                                <option key={op.id} value={op.id}>{op.nombre}</option>
+                            ))}
+                        </select>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <label className="w-full sm:w-auto px-5 py-3 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer text-center">
+                            <span className="text-blue-500 font-semibold">Seleccionar Excel</span>
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls"
+                                className="hidden"
+                                onChange={(e) => {
+                                    setFile(e.target.files[0]);
+                                    setFileError('');
+                                }}
+                            />
+                        </label>
+                        {file && <span className="text-gray-600 dark:text-gray-300">{file.name}</span>}
+                        <button
+                            onClick={processFile}
+                            disabled={!file || !selectedOperator || fileLoading}
+                            className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+                        >
+                            {fileLoading ? 'Procesando...' : 'Cargar Asignaciones'}
+                        </button>
+                    </div>
+                    {fileError && <p className="text-sm text-red-600">{fileError}</p>}
+                </div>
+            </div>
+
+            {/* Lista de Teleoperadores y sus asignaciones */}
+            <div className="space-y-4">
+                {operators.map(operator => (
+                    <div key={operator.id} className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{operator.nombre}</h3>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">{operator.email}</p>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">{operator.telefono}</p>
+                                <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-2">
+                                    {operator.beneficiarios?.length || 0} beneficiarios asignados
+                                </p>
+                            </div>
+                            <div className="flex items-center space-x-4">
+                                <button
+                                    onClick={() => toggleOperatorExpansion(operator.id)}
+                                    className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded flex items-center"
+                                >
+                                    {expandedOperators[operator.id] ? (
+                                        <>
+                                            <span className="mr-2">Ocultar Lista</span>
+                                            <ChevronUp size={16} />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="mr-2">Ver Lista</span>
+                                            <ChevronDown size={16} />
+                                        </>
+                                    )}
+                                </button>
+                                <button
+                                    onClick={() => handleClearAssignments(operator.id)}
+                                    className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/50 rounded"
+                                >
+                                    Eliminar Asignaciones
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {expandedOperators[operator.id] && operator.beneficiarios?.length > 0 && (
+                            <div className="mt-4 overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                    <thead className="bg-gray-50 dark:bg-gray-700">
+                                        <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                                Nombre
+                                            </th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                                Teléfonos
+                                            </th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                                Comuna
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                        {operator.beneficiarios.map((beneficiario, idx) => (
+                                            <tr key={idx}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                    {beneficiario.nombre}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                    {beneficiario.telefonos.join(', ')}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                    {beneficiario.comuna}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                ))}
             </div>
         </div>
     );
@@ -338,60 +782,111 @@ const Asignaciones = () => {
 
 // --- MÓDULO: HISTORIAL DE SEGUIMIENTOS ---
 const HistorialSeguimientos = () => {
-    // Datos de ejemplo. Deberían venir de un análisis cruzado en Firestore.
-    const beneficiaries = [
-        { id: 1, nombre: 'Juan Pérez', comuna: 'Santiago', ultimoLlamadoExitoso: '2025-07-05' },
-        { id: 2, nombre: 'Maria González', comuna: 'Providencia', ultimoLlamadoExitoso: '2025-06-20' },
-        { id: 3, nombre: 'Pedro Soto', comuna: 'Las Condes', ultimoLlamadoExitoso: '2025-05-10' },
-        { id: 4, nombre: 'Ana López', comuna: 'Santiago', ultimoLlamadoExitoso: '2025-07-01' },
-    ];
+    const [seguimientos, setSeguimientos] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
 
-    const getStatus = (lastCallDate) => {
-        if (!lastCallDate) return 'Urgente';
-        const today = new Date();
-        const lastCall = new Date(lastCallDate);
-        const diffDays = Math.ceil((today - lastCall) / (1000 * 60 * 60 * 24));
+    useEffect(() => {
+        const cargarSeguimientos = async () => {
+            try {
+                setLoading(true);
+                // TODO: Implementar la carga real de seguimientos desde Firebase
+                // Por ahora usamos datos de ejemplo
+                const datosPrueba = [];
+                setSeguimientos(datosPrueba);
+            } catch (err) {
+                console.error('Error al cargar seguimientos:', err);
+                setError('Error al cargar el historial de seguimientos');
+            } finally {
+                setLoading(false);
+            }
+        };
 
-        if (diffDays <= 15) return 'Al día';
-        if (diffDays <= 30) return 'Pendiente';
-        return 'Urgente';
-    };
+        cargarSeguimientos();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <p className="text-gray-600 dark:text-gray-300">Cargando seguimientos...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
+                <p>{error}</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="p-4 sm:p-8">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-6">Historial de Seguimientos</h1>
-            
-            {/* Filtros */}
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-lg mb-6 flex flex-wrap gap-4 items-center">
-                <h3 className="font-semibold text-gray-700 dark:text-gray-200">Filtrar por:</h3>
-                <select className="p-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 text-gray-800 dark:text-gray-200">
-                    <option>Comuna</option>
-                    <option>Santiago</option>
-                    <option>Providencia</option>
-                </select>
-                <select className="p-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 text-gray-800 dark:text-gray-200">
-                    <option>Estado</option>
-                    <option>Al día</option>
-                    <option>Pendiente</option>
-                    <option>Urgente</option>
-                </select>
-                 <select className="p-2 border rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 text-gray-800 dark:text-gray-200">
-                    <option>Teleoperadora</option>
-                    <option>Ana</option>
-                    <option>Juan</option>
-                </select>
+        <div className="p-4 sm:p-8 space-y-6">
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+                    Historial de Seguimientos
+                </h1>
             </div>
 
-            {/* Lista de Beneficiarios */}
-            <div className="space-y-4">
-                {beneficiaries.map(b => (
-                    <BeneficiaryCard key={b.id} beneficiary={b} status={getStatus(b.ultimoLlamadoExitoso)} />
-                ))}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">
+                    Registros de Seguimiento
+                </h2>
+                {seguimientos.length > 0 ? (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Fecha
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Beneficiario
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Teleoperador
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Estado
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Observaciones
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                {seguimientos.map((seguimiento, index) => (
+                                    <tr key={index}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {seguimiento.fecha}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {seguimiento.beneficiario}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {seguimiento.teleoperador}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {seguimiento.estado}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {seguimiento.observaciones}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <p className="text-gray-500 dark:text-gray-400 text-sm italic">
+                        No hay registros de seguimiento disponibles
+                    </p>
+                )}
             </div>
         </div>
     );
 };
-
 
 // --- COMPONENTE DE LOGIN ---
 const Login = ({ setAuthReady }) => {
@@ -406,29 +901,38 @@ const Login = ({ setAuthReady }) => {
         setError('');
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            // onAuthStateChanged se encargará de actualizar el estado de la app
         } catch (err) {
-            setError('Error al iniciar sesión. Revisa tus credenciales.');
+            if (err.code === 'auth/operation-not-allowed') {
+                setError('Error: El inicio de sesión con Email/Contraseña no está habilitado. Actívelo en la consola de Firebase.');
+            } else {
+                setError('Error al iniciar sesión. Revisa tus credenciales.');
+            }
             console.error(err);
         } finally {
             setLoading(false);
         }
     };
     
-    // Función para crear un usuario (ejemplo, podría estar en una página de registro)
     const handleSignUp = async (e) => {
         e.preventDefault();
+        if(!email || !password) {
+            setError("Por favor, ingrese email y contraseña.");
+            return;
+        }
         setLoading(true);
         setError('');
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            // Asignar un rol por defecto al nuevo usuario
-            await setDoc(doc(db, "users", userCredential.user.uid), {
-                email: userCredential.user.email,
-                role: "teleoperadora" // Rol por defecto
-            });
+            // La creación del documento de usuario ahora se maneja en onAuthStateChanged
         } catch (err) {
-            setError('Error al registrar el usuario.');
+            if (err.code === 'auth/operation-not-allowed') {
+                setError('Error: La creación de usuarios con Email/Contraseña no está habilitada. Actívela en la consola de Firebase.');
+            } else if (err.code === 'auth/invalid-email') {
+                setError('El formato del email no es válido.');
+            }
+            else {
+                setError('Error al registrar el usuario.');
+            }
             console.error(err);
         } finally {
             setLoading(false);
@@ -463,7 +967,7 @@ const Login = ({ setAuthReady }) => {
                             required
                         />
                     </div>
-                    {error && <p className="text-sm text-red-600">{error}</p>}
+                    {error && <p className="text-sm text-red-600 p-3 bg-red-100 dark:bg-red-900/30 rounded-md">{error}</p>}
                     <div>
                         <button
                             type="submit"
@@ -490,7 +994,7 @@ function App() {
     const [userData, setUserData] = useState(null);
     const [authReady, setAuthReady] = useState(false);
     const [scriptsReady, setScriptsReady] = useState(false);
-    const [scriptError, setScriptError] = useState(null);
+    const [appError, setAppError] = useState(null);
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [isSidebarOpen, setSidebarOpen] = useState(false);
 
@@ -513,26 +1017,35 @@ function App() {
         };
 
         Promise.all([
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'xlsx-script'),
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js', 'recharts-script'),
-            loadScript('https://unpkg.com/lucide-react/dist/umd/lucide-react.js', 'lucide-script')
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'xlsx-script')
         ]).then(() => {
             setScriptsReady(true);
         }).catch(error => {
             console.error("Error al cargar los scripts:", error);
-            setScriptError(error.message);
+            setAppError(error.message);
         });
 
         const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
                 const userDocRef = doc(db, "users", firebaseUser.uid);
                 const userDocSnap = await getDoc(userDocRef);
-                if (userDocSnap.exists()) {
-                    setUserData({ uid: firebaseUser.uid, ...userDocSnap.data() });
-                } else {
+
+                if (!userDocSnap.exists() && !firebaseUser.isAnonymous) {
+                    // Si el documento no existe y el usuario NO es anónimo, créalo.
+                    // Esto sucede justo después de que un nuevo usuario se registra.
                     const defaultUserData = { email: firebaseUser.email, role: 'teleoperadora' };
-                    await setDoc(userDocRef, defaultUserData);
-                    setUserData({ uid: firebaseUser.uid, ...defaultUserData });
+                    try {
+                        await setDoc(userDocRef, defaultUserData);
+                        setUserData({ uid: firebaseUser.uid, ...defaultUserData });
+                    } catch (error) {
+                         console.error("Error al crear el documento del usuario:", error);
+                         setAppError("Error de base de datos: Permisos insuficientes para crear un nuevo usuario. Revisa tus reglas de Firestore.");
+                    }
+                } else if (userDocSnap.exists()) {
+                     setUserData({ uid: firebaseUser.uid, ...userDocSnap.data() });
+                } else {
+                    // Es un usuario anónimo, no se necesita documento en Firestore.
+                    setUserData({ uid: firebaseUser.uid, role: 'anonymous' });
                 }
                 setUser(firebaseUser);
             } else {
@@ -541,6 +1054,21 @@ function App() {
             }
             setAuthReady(true);
         });
+        
+        // Solo intento login por token personalizado si está definido
+        if (!auth.currentUser) {
+            (async () => {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    }
+                    // El login anónimo está deshabilitado por configuración, no se intenta
+                } catch (error) {
+                    console.error("Error en el inicio de sesión inicial:", error);
+                    setAppError("Ocurrió un error de autenticación con Firebase.");
+                }
+            })();
+        }
 
         return () => authUnsubscribe();
     }, []);
@@ -564,20 +1092,24 @@ function App() {
         }
     };
     
-    if (scriptError) {
-        return <div className="flex items-center justify-center min-h-screen bg-red-100 text-red-700"><p>{scriptError}</p></div>;
+    if (appError) {
+        return <div className="flex items-center justify-center min-h-screen bg-red-100 text-red-700 p-4 text-center"><p>{appError}</p></div>;
     }
 
     if (!authReady || !scriptsReady) {
         return <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="text-xl dark:text-white">Cargando aplicación...</div></div>;
     }
 
-    if (!user) {
+    // Si la autenticación está lista pero no hay usuario, muestra el Login
+    if (authReady && !user) {
         return <Login setAuthReady={setAuthReady} />;
     }
     
-    const { XCircle, BarChart2, Upload, Users, History, LogOut } = window.lucide;
-
+    // Si hay un usuario, pero no hay datos de usuario (puede pasar brevemente), muestra cargando
+    if (!userData) {
+         return <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900"><div className="text-xl dark:text-white">Cargando datos de usuario...</div></div>;
+    }
+    
     const NavLink = ({ page, icon, children }) => (
         <button
             onClick={() => {
