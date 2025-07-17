@@ -20,7 +20,9 @@ import {
     query,
     where,
     getDocs,
-    onSnapshot
+    onSnapshot,
+    writeBatch,
+    serverTimestamp
 } from 'firebase/firestore';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
@@ -102,27 +104,147 @@ const BeneficiaryCard = ({ beneficiary, status }) => {
 
 // --- MÓDULO: DASHBOARD ---
 const Dashboard = () => {
-    const callsByOperator = [
-        { name: 'Ana', llamadas: 120, tiempo: 480 },
-        { name: 'Juan', llamadas: 98, tiempo: 350 },
-        { name: 'Maria', llamadas: 150, tiempo: 600 },
-        { name: 'Pedro', llamadas: 80, tiempo: 320 },
-    ];
+    const [operators, setOperators] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [callsData, setCallsData] = useState([]);
+    const [metrics, setMetrics] = useState({
+        totalCalls: 0,
+        successfulCalls: 0,
+        totalDuration: 0,
+        avgDuration: 0,
+        activeBeneficiaries: 0
+    });
+    const [callsByOperator, setCallsByOperator] = useState([]);
+    const [callsByDay, setCallsByDay] = useState([]);
+    const [callResults, setCallResults] = useState([]);
 
-    const callsByDay = [
-        { day: 'Lun', llamadas: 50 },
-        { day: 'Mar', llamadas: 65 },
-        { day: 'Mié', llamadas: 80 },
-        { day: 'Jue', llamadas: 72 },
-        { day: 'Vie', llamadas: 95 },
-    ];
-    
-    const callResults = [
-        { name: 'Exitosos', value: 462 },
-        { name: 'Sin Respuesta', value: 88 },
-    ];
+    // Cargar datos de teleoperadores y llamadas
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                setLoading(true);
+                
+                // Cargar datos de teleoperadores desde Firebase
+                const operatorsRef = collection(db, 'operators');
+                const operatorsSnapshot = await getDocs(operatorsRef);
+                const operatorsList = operatorsSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setOperators(operatorsList);
+
+                // Cargar datos de llamadas desde Firebase
+                const callsRef = collection(db, 'calls');
+                const callsSnapshot = await getDocs(callsRef);
+                const calls = callsSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setCallsData(calls);
+
+                // Procesar métricas cruzadas
+                processMetrics(operatorsList, calls);
+
+            } catch (err) {
+                console.error('Error al cargar datos:', err);
+                setError('Error al cargar las métricas del dashboard');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadData();
+    }, []);
+
+    const processMetrics = (operators, callsData) => {
+        if (!callsData || !operators) return;
+
+        // Calcular métricas generales
+        const totalCalls = callsData.length;
+        const successfulCalls = callsData.filter(call => call.Resultado === 'Llamado exitoso').length;
+        const totalDurationSeconds = callsData
+            .filter(call => call.Resultado === 'Llamado exitoso')
+            .reduce((acc, call) => acc + (call.Seg || 0), 0);
+        const avgDurationMinutes = successfulCalls > 0 
+            ? (totalDurationSeconds / successfulCalls / 60).toFixed(2) 
+            : 0;
+
+        // Métricas generales
+        const metrics = {
+            totalCalls,
+            successfulCalls,
+            totalDuration: totalDurationSeconds,
+            avgDuration: parseFloat(avgDurationMinutes),
+            activeBeneficiaries: operators.reduce((acc, op) => acc + (op.beneficiarios?.length || 0), 0)
+        };
+        setMetrics(metrics);
+
+        // Procesar llamadas por operador
+        const operatorCallsMap = new Map();
+        const operatorDurationMap = new Map();
+        operators.forEach(op => {
+            operatorCallsMap.set(op.nombre, 0);
+            operatorDurationMap.set(op.nombre, 0);
+        });
+
+        callsData.forEach(call => {
+            const operatorName = call.Teleoperadora;
+            if (operatorCallsMap.has(operatorName)) {
+                operatorCallsMap.set(operatorName, operatorCallsMap.get(operatorName) + 1);
+                operatorDurationMap.set(operatorName, operatorDurationMap.get(operatorName) + (call.Seg || 0));
+            }
+        });
+
+        const callsByOperator = Array.from(operatorCallsMap).map(([name, calls]) => ({
+            name,
+            llamadas: calls,
+            minutos: Math.round(operatorDurationMap.get(name) / 60)
+        }));
+        setCallsByOperator(callsByOperator);
+
+        // Procesar llamadas por día
+        const dailyCallsMap = new Map();
+        const daysOfWeek = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+        
+        callsData.forEach(call => {
+            if (call.Fecha) {
+                const date = new Date(call.Fecha);
+                const dayName = daysOfWeek[date.getDay()];
+                dailyCallsMap.set(dayName, (dailyCallsMap.get(dayName) || 0) + 1);
+            }
+        });
+
+        const callsByDay = daysOfWeek.map(day => ({
+            day,
+            llamadas: dailyCallsMap.get(day) || 0
+        }));
+        setCallsByDay(callsByDay);
+
+        // Resultados de llamadas
+        setCallResults([
+            { name: 'Exitosas', value: successfulCalls },
+            { name: 'Sin Respuesta', value: totalCalls - successfulCalls }
+        ]);
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <p className="text-gray-600 dark:text-gray-300">Cargando métricas...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
+                <p>{error}</p>
+            </div>
+        );
+    }
+
     const COLORS = ['#4ade80', '#f87171'];
-
 
     return (
         <div className="p-4 sm:p-8 space-y-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -130,10 +252,30 @@ const Dashboard = () => {
             
             {/* Métricas Clave */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard title="Llamados Exitosos" value="462" icon={<CheckCircle size={24} className="text-white" />} color="bg-gradient-to-br from-green-400 to-green-600" />
-                <StatCard title="Tiempo Total (min)" value="1,800" icon={<Clock size={24} className="text-white" />} color="bg-gradient-to-br from-blue-400 to blue-600" />
-                <StatCard title="Promedio Llamada (min)" value="3.9" icon={<Phone size={24} className="text-white" />} color="bg-gradient-to-br from-purple-400 to-purple-600" />
-                <StatCard title="Beneficiarios Activos" value="125" icon={<Users size={24} className="text-white" />} color="bg-gradient-to-br from-yellow-400 to-yellow-600" />
+                <StatCard 
+                    title="Llamados Exitosos" 
+                    value={metrics.successfulCalls.toString()} 
+                    icon={<CheckCircle size={24} className="text-white" />} 
+                    color="bg-gradient-to-br from-green-400 to-green-600" 
+                />
+                <StatCard 
+                    title="Tiempo Total (min)" 
+                    value={(metrics.totalCalls * metrics.avgDuration).toFixed(0)} 
+                    icon={<Clock size={24} className="text-white" />} 
+                    color="bg-gradient-to-br from-blue-400 to blue-600" 
+                />
+                <StatCard 
+                    title="Promedio Llamada (min)" 
+                    value={metrics.avgDuration.toString()} 
+                    icon={<Phone size={24} className="text-white" />} 
+                    color="bg-gradient-to-br from-purple-400 to-purple-600" 
+                />
+                <StatCard 
+                    title="Beneficiarios Activos" 
+                    value={metrics.activeBeneficiaries.toString()} 
+                    icon={<Users size={24} className="text-white" />} 
+                    color="bg-gradient-to-br from-yellow-400 to-yellow-600" 
+                />
             </div>
 
             {/* Gráficas */}
@@ -145,9 +287,13 @@ const Dashboard = () => {
                             <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
                             <XAxis dataKey="name" stroke="#9ca3af" />
                             <YAxis stroke="#9ca3af" />
-                            <Tooltip contentStyle={{ backgroundColor: 'rgba(31, 41, 55, 0.8)', border: 'none', borderRadius: '0.75rem' }} />
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: 'rgba(31, 41, 55, 0.8)', border: 'none', borderRadius: '0.75rem' }}
+                                formatter={(value, name) => [value, name === "llamadas" ? "Llamadas" : "Minutos"]}
+                            />
                             <Legend />
                             <Bar dataKey="llamadas" fill="#8884d8" name="Nº de Llamadas" />
+                            <Bar dataKey="minutos" fill="#82ca9d" name="Minutos Totales" />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
@@ -188,6 +334,51 @@ const Dashboard = () => {
                         </PieChart>
                     </ResponsiveContainer>
                 </div>
+
+                <div className="p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg">
+                    <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-4">Resumen por Teleoperadora</h2>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Teleoperadora
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Beneficiarios
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Llamadas
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Minutos
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                {operators.map((operator, idx) => {
+                                    const operatorStats = callsByOperator.find(c => c.name === operator.nombre) || { llamadas: 0, minutos: 0 };
+                                    return (
+                                        <tr key={idx}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                {operator.nombre}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                {operator.beneficiarios?.length || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                {operatorStats.llamadas}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                                {operatorStats.minutos}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -196,29 +387,35 @@ const Dashboard = () => {
 // --- MÓDULO: REGISTRO DE LLAMADAS ---
 const RegistroLlamadas = () => {
     const [file, setFile] = useState(null);
-    const [data, setData] = useState(() => {
-        const savedData = localStorage.getItem('llamadasData');
-        return savedData ? JSON.parse(savedData) : [];
-    });
-    const [loading, setLoading] = useState(false);
+    const [data, setData] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [analysis, setAnalysis] = useState(() => {
-        const savedAnalysis = localStorage.getItem('llamadasAnalysis');
-        return savedAnalysis ? JSON.parse(savedAnalysis) : null;
-    });
+    const [analysis, setAnalysis] = useState(null);
 
-    // Guardar datos en localStorage cuando cambien
+    // Cargar datos desde Firebase al montar el componente
     useEffect(() => {
-        if (data.length > 0) {
-            localStorage.setItem('llamadasData', JSON.stringify(data));
-        }
-    }, [data]);
+        const loadCallData = async () => {
+            try {
+                const callsRef = collection(db, 'calls');
+                const querySnapshot = await getDocs(callsRef);
+                const calls = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setData(calls);
+                if (calls.length > 0) {
+                    setAnalysis(analyzeData(calls));
+                }
+            } catch (err) {
+                console.error('Error al cargar llamadas:', err);
+                setError('Error al cargar los datos de llamadas');
+            } finally {
+                setLoading(false);
+            }
+        };
 
-    useEffect(() => {
-        if (analysis) {
-            localStorage.setItem('llamadasAnalysis', JSON.stringify(analysis));
-        }
-    }, [analysis]);
+        loadCallData();
+    }, []);
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0];
@@ -228,87 +425,208 @@ const RegistroLlamadas = () => {
         }
     };
 
-    const handleClearData = () => {
-        setData([]);
-        setAnalysis(null);
-        setFile(null);
-        localStorage.removeItem('llamadasData');
-        localStorage.removeItem('llamadasAnalysis');
+    const handleClearData = async () => {
+        try {
+            setLoading(true);
+            const callsRef = collection(db, 'calls');
+            const querySnapshot = await getDocs(callsRef);
+            
+            // Eliminar todos los documentos en lotes
+            const batch = writeBatch(db);
+            querySnapshot.docs.forEach((doc) => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+
+            setData([]);
+            setAnalysis(null);
+        } catch (err) {
+            console.error('Error al eliminar datos:', err);
+            setError('Error al eliminar los datos');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const processFile = async () => {
         if (!file) {
-            setError('Por favor, selecciona un archivo Excel.');
+            setError('Por favor, seleccione un archivo Excel');
             return;
         }
+
         setLoading(true);
         setError('');
-        // Limpiar datos anteriores antes de procesar el nuevo archivo
-        setData([]);
-        setAnalysis(null);
-        localStorage.removeItem('llamadasData');
-        localStorage.removeItem('llamadasAnalysis');
 
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
-                // Usar el objeto global XLSX cargado por el script
-                const workbook = window.XLSX.read(e.target.result, { type: 'binary' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                 
-                const headers = jsonData[0];
-                const rows = jsonData.slice(1);
-
-                const parsedData = rows.map(row => {
-                    let rowData = {};
-                    headers.forEach((header, index) => {
-                        rowData[header] = row[index];
-                    });
-                    return rowData;
+                // Definir el mapeo exacto de columnas
+                const parsedData = XLSX.utils.sheet_to_json(firstSheet, {
+                    raw: true,
+                    defval: '', // Valor por defecto para celdas vacías
+                    header: ['Id', 'Fecha', 'Beneficiario', 'Comuna', 'Evento', 'Fono', 'Ini', 'Fin', 'Seg', 'Resultado', 'Observacion', 'ApiId']
                 });
-                
-                setData(parsedData);
-                analyzeData(parsedData);
 
+                if (parsedData.length === 0) {
+                    throw new Error('El archivo está vacío');
+                }
+
+                // Guardar datos en Firebase
+                const batch = writeBatch(db);
+                const callsRef = collection(db, 'calls');
+
+                // Filtrar y procesar los datos
+                // Primero validamos la estructura del Excel
+                if (!parsedData[0]?.Id || !parsedData[0]?.Fecha) {
+                    throw new Error('El archivo Excel no tiene el formato correcto. Debe contener las columnas: Id, Fecha, Beneficiario, Comuna, Evento, Fono, Ini, Fin, Seg, Resultado');
+                }
+
+                const processedData = parsedData
+                    .filter(row => row.Id && row.Fecha) // Asegurarse de que tenga al menos ID y fecha
+                    .map(call => {
+                        // Procesar la fecha (DD-MM-AAAA)
+                        let fecha;
+                        const fechaStr = String(call.Fecha);
+                        const parts = fechaStr.split('-');
+                        if (parts.length === 3) {
+                            // Formato DD-MM-AAAA
+                            fecha = new Date(parts[2], parts[1] - 1, parts[0]);
+                        } else if (fechaStr.includes('/')) {
+                            // Intentar con formato DD/MM/AAAA
+                            const partesSlash = fechaStr.split('/');
+                            fecha = new Date(partesSlash[2], partesSlash[1] - 1, partesSlash[0]);
+                        } else {
+                            // Intentar parsear como fecha de Excel
+                            fecha = new Date(call.Fecha);
+                        }
+
+                        // Validar fecha
+                        if (isNaN(fecha.getTime())) {
+                            fecha = new Date(); // Si la fecha no es válida, usar la fecha actual
+                        }
+
+                        // Procesar los segundos y convertir a minutos si es > 60
+                        const segundos = parseInt(call.Seg) || 0;
+                        const minutos = segundos >= 60 ? (segundos / 60).toFixed(2) : null;
+
+                        // Procesar número de teléfono (asegurar 9 dígitos)
+                        const fonoLimpio = String(call.Fono).replace(/\D/g, '');
+                        const fono = fonoLimpio.length > 9 ? fonoLimpio.slice(-9) : fonoLimpio;
+
+                        // Validar el beneficiario
+                        const esNoRegistrado = !call.Beneficiario || call.Beneficiario === 'No identificado';
+                        const nombreBeneficiario = esNoRegistrado ? 'No identificado' : call.Beneficiario.trim();
+
+                        // Estructura de datos limpia y ordenada
+                        return {
+                            IdAmaia: call.Id,
+                            Fecha: fecha.toISOString().split('T')[0], // YYYY-MM-DD
+                            Beneficiario: nombreBeneficiario,
+                            Comuna: call.Comuna?.trim() || 'No especificada',
+                            Evento: call.Evento?.trim() || 'No especificado',
+                            Fono: fono,
+                            HoraInicio: call.Ini?.trim() || '',
+                            HoraFin: call.Fin?.trim() || '',
+                            Segundos: segundos,
+                            MinutosLlamada: minutos,
+                            Resultado: call.Resultado?.trim() || 'Sin respuesta',
+                            EsLlamadaExitosa: call.Resultado === 'Llamado exitoso',
+                            EsNumeroNoRegistrado: esNoRegistrado,
+                            timestamp: serverTimestamp()
+                        };
+                    });
+
+                // Guardar los datos procesados
+                processedData.forEach((callData) => {
+                    const newCallRef = doc(callsRef);
+                    batch.set(newCallRef, callData);
+                });
+
+                await batch.commit();
+
+                // Recargar datos después de guardar
+                const querySnapshot = await getDocs(callsRef);
+                const calls = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+
+                setData(calls);
+                setAnalysis(analyzeData(calls));
+                setFile(null);
             } catch (err) {
-                console.error("Error al procesar el archivo:", err);
-                setError('Hubo un error al leer el archivo. Asegúrate de que tenga el formato correcto.');
+                console.error('Error al procesar el archivo:', err);
+                setError(err.message || 'Error al procesar el archivo Excel');
             } finally {
                 setLoading(false);
             }
         };
-        reader.readAsBinaryString(file);
+
+        reader.readAsArrayBuffer(file);
     };
-    
+
     const analyzeData = (parsedData) => {
-        let totalCalls = parsedData.length;
-        let incoming = 0;
-        let outgoing = 0;
-        let successful = 0;
-        let totalDurationSeconds = 0;
-        let unidentified = 0;
-        
-        parsedData.forEach(call => {
-            if(call.Evento === 'Entrante') incoming++;
-            if(call.Evento === 'Saliente') outgoing++;
-            if(call.Resultado === 'Llamado exitoso') {
-                successful++;
-                totalDurationSeconds += (call.Seg || 0);
+        const analysis = parsedData.reduce((acc, call) => {
+            // Conteo total de llamadas
+            acc.totalCalls++;
+
+            // Analizar por tipo de evento (Entrante/Saliente)
+            if (call.Evento === 'Entrante') acc.incoming++;
+            if (call.Evento === 'Saliente') acc.outgoing++;
+
+            // Analizar llamadas exitosas y duración
+            if (call.EsLlamadaExitosa) {
+                acc.successful++;
+                acc.totalDurationSeconds += call.Segundos;
+                
+                // Actualizar duración máxima si corresponde
+                if (call.Segundos > acc.maxDurationSeconds) {
+                    acc.maxDurationSeconds = call.Segundos;
+                }
             }
-            if(call.Beneficiario === 'No identificado') unidentified++;
+
+            // Contar números no registrados
+            if (call.EsNumeroNoRegistrado) {
+                acc.unidentified++;
+            }
+
+            // Contar llamadas por comuna
+            if (call.Comuna && call.Comuna !== 'No especificada') {
+                acc.comunas[call.Comuna] = (acc.comunas[call.Comuna] || 0) + 1;
+            }
+
+            return acc;
+        }, {
+            totalCalls: 0,
+            incoming: 0,
+            outgoing: 0,
+            successful: 0,
+            unidentified: 0,
+            totalDurationSeconds: 0,
+            maxDurationSeconds: 0,
+            comunas: {}
         });
 
-        const avgDurationMinutes = successful > 0 ? (totalDurationSeconds / successful / 60).toFixed(2) : 0;
-        
+        // Calcular promedios y porcentajes
+        const avgDurationMinutes = analysis.successful > 0 
+            ? (analysis.totalDurationSeconds / analysis.successful / 60).toFixed(2) 
+            : 0;
+
+        const maxDurationMinutes = (analysis.maxDurationSeconds / 60).toFixed(2);
+        const successRate = ((analysis.successful / analysis.totalCalls) * 100).toFixed(1);
+
         const newAnalysis = {
-            totalCalls,
-            incoming,
-            outgoing,
-            successful,
-            unidentified,
-            avgDurationMinutes
+            ...analysis,
+            avgDurationMinutes,
+            maxDurationMinutes,
+            successRate,
+            comunasOrdenadas: Object.entries(analysis.comunas)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5) // Top 5 comunas
         };
         
         setAnalysis(newAnalysis);
@@ -376,30 +694,78 @@ const RegistroLlamadas = () => {
                         </div>
                     </div>
                 </div>
-            )}
-
-            {data.length > 0 && (
+            )}                {data.length > 0 && (
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg overflow-auto">
                     <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Detalle de Llamadas</h2>
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead className="bg-gray-50 dark:bg-gray-700">
                                 <tr>
-                                    {Object.keys(data[0]).map((header, index) => (
-                                        <th key={index} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                            {header}
-                                        </th>
-                                    ))}
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        ID
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Fecha
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Beneficiario
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Comuna
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Evento
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Teléfono
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Inicio
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Fin
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Duración
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                        Resultado
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                 {data.map((row, rowIndex) => (
                                     <tr key={rowIndex}>
-                                        {Object.values(row).map((cell, cellIndex) => (
-                                            <td key={cellIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                                                {cell}
-                                            </td>
-                                        ))}
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.IdAmaia}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {new Date(row.Fecha).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.Beneficiario}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.Comuna}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.Evento}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.Fono}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.HoraInicio}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.HoraFin}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.MinutosLlamada ? `${row.MinutosLlamada} min` : `${row.Segundos} seg`}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                            {row.Resultado}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
